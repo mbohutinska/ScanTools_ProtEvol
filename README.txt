@@ -9,7 +9,7 @@ Program Description:  ScanTools_ProtEvol is a collection of scripts for window-b
 For site-based analyses requiring additional annotation of variant effect and amino acid substitution type, the VCF has to be annotated in SnpEff (http://snpeff.sourceforge.net/index.html) prior to the analysis. Example annotation script can be found on repository. 
 VCF's are split according by a population and converted to a simplified format, which are used for all downstream analyses. Currently, the major downstream analyses implemented are calculation of within population diversity metrics and neutrality tests, between population differentiation metrics, demographic analyses using fastsimcoal2, analyses of dN/dS and scans for highly differentiated amino acid substitutions.
 
-#######################################################p####
+###########################################################
 
 REQUIREMENTS:
 
