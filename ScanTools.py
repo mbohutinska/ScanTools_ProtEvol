@@ -96,7 +96,7 @@ class scantools:
         self.log_file.write("Combined Pops: " + str(pops) + " as " + popname + "\n")
 
 
-    def splitVCFs(self, vcf_dir, min_dp, mffg, ref_path="/storage/plzen1/home/holcovam/references/lyrataV2/", ref_name="alygenomes.fasta", gatk_path="$GATK/GenomeAnalysisTK.jar", repolarization_key="repolarized.lookupKey.perSpeciesThreshold.txt", pops='all', mem=16, time_scratch='4:00:00', ncpu=4, scratch_path="$SCRATCHDIR",print1=True, overwrite=False, scratch_gb="10", keep_intermediates=False, use_scratch=True):
+    def splitVCFsTreeMix(self, vcf_dir, min_dp, mffg, ref_path="/storage/plzen1/home/holcovam/references/lyrataV2/", ref_name="alygenomes.fasta", gatk_path="$GATK/GenomeAnalysisTK.jar", pops='all', mem=16, time_scratch='4:00:00', ncpu=4, scratch_path="$SCRATCHDIR",print1=True, overwrite=False, scratch_gb="10", keep_intermediates=False, use_scratch=True):
         '''Purpose:  Find all vcfs in vcf_dir and split them by population according to samples associated with said population.
                     Then, take only biallelic snps and convert vcf to table containing scaff, pos, ac, an, dp, and genotype fields.
                     Finally, concatenate all per-scaffold tables to one giant table. Resulting files will be put into ~/Working_Dir/VCFs/
@@ -165,31 +165,31 @@ class scantools:
                              'cp $DATADIR/'+ vcf_dir +'*vcf.gz* $SCRATCHDIR || exit 1\n'+
                              'cd $SCRATCHDIR || exit 2\n' +
                              'echo data all scaffolds present in the vcf_dir loaded at `date`\n' +
-                             'ls *vcf.gz | parallel -j '+str(int(ncpu)-2)+' "java -Xmx' + str(int(int(mem)/(int(ncpu)-2))) + 'g -jar ' + gatk_path + ' -T SelectVariants -R ' + ref_name + ' -V {} '  + sample_string1 + ' -o {.}.' + pop + '.pop.vcf"\n' +
+                             'ls *vcf.gz | parallel -j '+str(int(ncpu)-2)+' "java -Xmx' + str(int(int(mem)/(int(ncpu)-2))) + 'g -jar ' + gatk_path + ' -T SelectVariants -R ' + ref_name + ' -V {} '  + sample_string1 + ' -o {.}.' + pop + '.pop.vcf"\n'+
                              'ls *pop.vcf | parallel -j '+str(int(ncpu)-2)+' "java -Xmx' + str(int(int(mem)/(int(ncpu)-2))) + 'g -jar ' + gatk_path + ' -T VariantFiltration -R ' + ref_name + ' -V {} --genotypeFilterExpression \\"DP < ' + str(min_dp) + '\\" --genotypeFilterName \\"DP\\" -o {.}.dp1.vcf"\n') # some bug in this part, well yea " were missing?
                 if keep_intermediates is False: shfile1.write('ls *pop.vcf| parallel -j '+str(int(ncpu)-2)+' "rm {} {}.idx"\n')
                 shfile1.write('ls *dp1.vcf| parallel -j '+str(int(ncpu)-2)+' "java -Xmx' + str(int(int(mem)/(int(ncpu)-2))) + 'g -jar ' + gatk_path + ' -T VariantFiltration -R ' + ref_name + ' -V {} --setFilteredGtToNocall -o {.}.nc.vcf"\n')
                 if keep_intermediates is False: shfile1.write('ls *dp1.vcf| parallel -j '+str(int(ncpu)-2)+' "rm {} {}.idx"\n')
                 shfile1.write('ls *nc.vcf |  parallel -j '+str(int(ncpu)-2)+' "java -Xmx' + str(int(int(mem)/(int(ncpu)-2))) + 'g -jar ' + gatk_path + ' -T SelectVariants -R ' + ref_name + ' -V {} --maxNOCALLnumber ' + str(mfg) + ' -o {.}.bi.vcf"\n')
                 if keep_intermediates is False: shfile1.write('ls *nc.vcf| parallel -j '+str(int(ncpu)-2)+' "rm {} {}.idx"\n')
-                shfile1.write('ls *bi.vcf| parallel -j '+str(int(ncpu)-2)+' "java -Xmx' + str(int(int(mem)/(int(ncpu)-2))) + 'g -jar ' + gatk_path + ' -T VariantsToTable -R ' + ref_name + ' -V {} -F CHROM -F POS -F REF -F AN -F DP -GF GT -o {.}_raw.table"\n') # it will contain the long string have to rename it
+                shfile1.write('ls *bi.vcf| parallel -j '+str(int(ncpu)-2)+' "java -Xmx' + str(int(int(mem)/(int(ncpu)-2))) + 'g -jar ' + gatk_path + ' -T VariantsToTable -R ' + ref_name + ' -V {} -F CHROM -F POS -F AC -F AN -o {.}_raw.table"\n') # it will contain the long string have to rename it
                 if keep_intermediates is False: shfile1.write('ls *bi.vcf| parallel -j '+str(int(ncpu)-2)+' "rm {} {}.idx"\n' +
                         'echo filtering done at `date` now continue with combining the scaffolds\n\n\n')
                 
-                shfile1.write('cp $DATADIR/recode012.py $SCRATCHDIR || exit 1\n'+
-                        'cp $DATADIR/repol.py $SCRATCHDIR || exit 1\n'+
-                        'cp $DATADIR/'+repolarization_key+' $SCRATCHDIR || exit 1\n'+
-                        'cat *_raw.table | tail -n+2 > '+ pop +'.table\n'+
-                        'python3 recode012.py -i ' + pop + '.table -pop ' + pop + ' -o $SCRATCHDIR/\n'+
-                        'python3 repol.py -i ' + pop + '.table.recode.txt -o ' + pop + ' -r ' + repolarization_key + '\n')
+                shfile1.write('cat *_raw.table | grep -v "CHROM" > '+ pop +'_tm.table\n')
+                #        'cp $DATADIR/repol.py $SCRATCHDIR || exit 1\n'+
+                #        'cp $DATADIR/'+repolarization_key+' $SCRATCHDIR || exit 1\n'+
+                 #       'cat *_raw.table | tail -n+2 > '+ pop +'.table\n'+
+                #        'python3 recode012.py -i ' + pop + '.table -pop ' + pop + ' -o $SCRATCHDIR/\n'+
+                #        'python3 repol.py -i ' + pop + '.table.recode.txt -o ' + pop + ' -r ' + repolarization_key + '\n')
 
                 shfile1.write('rm '+ref_spec+'*\n'+
-                            'rm *vcf.gz* \n'+
+                          #  'rm *vcf.gz* \n'+
                             'rm *_raw.table\n'+
-                            'rm recode012.py\n'+
-                            'rm repol.py\n'+
-                            'rm '+repolarization_key+'\n'+
-                            'rm '+ pop + '.table\n'+
+                          #  'rm recode012.py\n'+
+                        #    'rm repol.py\n'+
+                      #      'rm '+repolarization_key+'\n'+
+                        #    'rm '+ pop + '.table\n'+
                             'cp $SCRATCHDIR/* $DATADIR/'+outdir+' || export CLEAN_SCRATCH=false\n'+
                             'printf "\\nFinished\\n\\n"\n')
                 shfile1.close()
@@ -209,7 +209,7 @@ class scantools:
                 self.log_file.write("###  Split VCFs  ###\n" +
                                     "VCF Directory: " + vcf_dir + "\n" +
                                     "Reference Path: " + ref_path + "\n" +
-                                    "Repolarization Key: " + repolarization_key + "\n" +
+                                #    "Repolarization Key: " + repolarization_key + "\n" +
                                     "Output Directory: " + outdir + "\n" +
                                     "Min Depth Per Individual: " + str(min_dp) + "\n" +
                                     "Max Fraction of Filtered Genotypes: " + str(mffg) + "\n" +
@@ -283,10 +283,10 @@ class scantools:
                              'if [ ! -d "$SCRATCHDIR" ] ; then echo "Scratch not created!" 1>&2; exit 1; fi \n' +
                              'DATADIR="/storage/plzen1/home/holcovam/ScanTools"\n' +
                              'cp '+ref_path+ref_spec+'* $SCRATCHDIR || exit 1\n' +
-                             'cp $DATADIR/'+ vcf_dir +'*vcf.gz* $SCRATCHDIR || exit 1\n'+
+                             'cp $DATADIR/'+ vcf_dir +'*vcf* $SCRATCHDIR || exit 1\n'+###!!!!!!!!!!   add .gz
                              'cd $SCRATCHDIR || exit 2\n' +
-                             'echo data all scaffolds present in the vcf_dir loaded at `date`\n' +
-                             'ls *vcf.gz | parallel -j '+str(int(ncpu)-2)+' "java -Xmx' + str(int(int(mem)/(int(ncpu)-2))) + 'g -jar ' + gatk_path + ' -T SelectVariants -R ' + ref_name + ' -V {} '  + sample_string1 + ' -o {.}.' + pop + '.pop.vcf"\n' +
+                             'echo data all scaffolds present in the vcf_dir loaded at `date`\n' + ##ADD *VCF.GZ!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+                             'ls *.vcf* | parallel -j '+str(int(ncpu)-2)+' "java -Xmx' + str(int(int(mem)/(int(ncpu)-2))) + 'g -jar ' + gatk_path + ' -T SelectVariants -R ' + ref_name + ' -V {} '  + sample_string1 + ' -o {.}.' + pop + '.pop.vcf"\n' +
                              'ls *pop.vcf | parallel -j '+str(int(ncpu)-2)+' "java -Xmx' + str(int(int(mem)/(int(ncpu)-2))) + 'g -jar ' + gatk_path + ' -T VariantFiltration -R ' + ref_name + ' -V {} --genotypeFilterExpression \\"DP < ' + str(min_dp) + '\\" --genotypeFilterName \\"DP\\" -o {.}.dp1.vcf"\n') # some bug in this part, well yea " were missing?
                 if keep_intermediates is False: shfile1.write('ls *pop.vcf| parallel -j '+str(int(ncpu)-2)+' "rm {} {}.idx"\n')
                 shfile1.write('ls *dp1.vcf| parallel -j '+str(int(ncpu)-2)+' "java -Xmx' + str(int(int(mem)/(int(ncpu)-2))) + 'g -jar ' + gatk_path + ' -T VariantFiltration -R ' + ref_name + ' -V {} --setFilteredGtToNocall -o {.}.nc.vcf"\n')
@@ -306,7 +306,7 @@ class scantools:
 
 
                 shfile1.write('rm '+ref_spec+'*\n'+
-                            'rm *vcf.gz* \n'+
+                            'rm *.vcf* \n'+ ####ADD .gz
                             'rm *_raw.table\n'+
                             'rm recode012ann.py\n'+
                             'rm repolann.py\n'+
