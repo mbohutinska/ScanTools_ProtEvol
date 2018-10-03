@@ -63,7 +63,9 @@ Most of these methods include a print1 argument that, if set to True, will print
  - .splitVCFs(vcf_directory, minimum_individual_depth, max_fraction_filtered_genotypes):  Split VCF's by population, filter, and convert to input format for downstream analyses.
  
  - .splitVCFsAnn(vcf_directory, minimum_individual_depth, max_fraction_filtered_genotypes):  Same as .splitVCFs but works with SnpEff-annotated vcf. 
-
+ 
+ - .splitVCFsTreeMix(vcf_directory, minimum_individual_depth, max_fraction_filtered_genotypes): Makes input for scripts in TreeMix repository
+ 
  - .recode(table_directory): Should not be necessary for the most part.  This will typically be called during '.splitVCFs', but was left in code as standalone method in case there is need to convert a table (from GATK's VariantsToTable) to the reformatted input used in ScanTools.
 
  - .repolarize(recoded_file_directory):  Also should not be necessary for most part as it is typically called in '.splitVCFs' if a repolarization key is provided.  A repolarization key is simply a tab-delimited list of sites where each line contains the scaffold and position for a site.  This code will go through the recoded, numeric genotype files and flip the reference and alt alleles, modifying genotypes accordingly.
