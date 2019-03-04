@@ -95,6 +95,124 @@ class scantools:
         self.samp_nums[popname] = len(new_samps)
         self.log_file.write("Combined Pops: " + str(pops) + " as " + popname + "\n")
 
+    def splitVCFs(self, vcf_dir, min_dp, mffg, ref_path="/storage/plzen1/home/holcovam/references/lyrataV2/", ref_name="alygenomes.fasta", gatk_path="$GATK/GenomeAnalysisTK.jar", repolarization_key="repolarized.lookupKey.perSpeciesThreshold.txt", pops='all', mem=16, time_scratch='4:00:00', ncpu=4, scratch_path="$SCRATCHDIR",print1=True, overwrite=False, scratch_gb="10", keep_intermediates=False, use_scratch=True):
+        '''Purpose:  Find all vcfs in vcf_dir and split them by population according to samples associated with said population.
+                    Then, take only biallelic snps and convert vcf to table containing scaff, pos, ac, an, dp, and genotype fields.
+                    Finally, concatenate all per-scaffold tables to one giant table. Resulting files will be put into ~/Working_Dir/VCFs/
+            Notes: mffg is maximum fraction of filtered genotypes.  Number of actual genotypes allowed will be rounded up.
+                    If you want to print the batch scripts, you must set print1 and overwrite to True'''
+
+        if vcf_dir.endswith("/") is False:
+            vcf_dir += "/"
+        vcf_dir_name = vcf_dir.split("/")[-2]
+        if use_scratch is True:
+            outdir = "VCF_" + str(vcf_dir_name) + "_DP" + str(min_dp) + ".M" + str(mffg) + "/"
+        else:
+            outdir = self.dir + "VCF_" + str(vcf_dir_name) + "_DP" + str(min_dp) + ".M" + str(mffg) + "/"
+        self.vcf_dir = vcf_dir
+        if outdir not in self.split_dirs:
+            self.split_dirs.append(outdir)
+
+        ref_spec = ref_name.split(".")[0]
+
+        if os.path.exists(outdir) is False:
+            os.mkdir(outdir)
+        elif overwrite is True:
+            print("Overwriting files in existing VCF directory")
+
+        if pops == 'all':
+            pops = self.pops
+
+        for pop in pops:
+
+            if (os.path.exists(outdir + pop + '.table.repol.txt') is True or os.path.exists(outdir + pop + '.table.recode.txt') is True) and overwrite is not True:
+                print("Found file for pop = " + pop + '.  Set overwrite = True to overwrite files.')
+            else:
+                # Add samples to list for each population according to PF file
+                sample_string1 = ""
+                for samp in self.samps[pop]:
+                    sample_string1 += " -sn " + samp 
+                joblist = []
+
+                mfg = int(math.ceil(float(self.samp_nums[pop]) * float(mffg)))
+
+                vcf_list = []
+                vcf_basenames = []
+                for file in os.listdir(vcf_dir):
+                    if file[-6:] == 'vcf.gz':
+                        vcf_list.append(file)
+                        vcf_basenames.append(file[:-7])
+                    elif file[-3:] == 'vcf':
+                        vcf_list.append(file)
+                        vcf_basenames.append(file[:-4])
+                print(vcf_list)
+                    # Select single population and biallelic SNPs for each scaffold and convert to variants table
+                    
+                shfile1 = open(pop + vcf_dir_name + '.sh', 'w')
+                shfile1.write('#!/bin/bash\n' +
+                             '#PBS -N '+pop + vcf_dir_name +'\n' +
+                             '#PBS -l walltime='+time_scratch+'\n' +
+                             '#PBS -l select=1:ncpus='+ncpu+':mem='+mem+'gb:scratch_local='+scratch_gb+'gb\n' +
+                             '#PBS -j oe\n\n' +
+                             'module add gatk-3.7 \n'+
+                             'module add python-3.4.1-gcc \n'+
+                             'module add parallel-20160622 \n'+
+                             'trap \'clean_scratch\' TERM EXIT\n'+
+                             'if [ ! -d "$SCRATCHDIR" ] ; then echo "Scratch not created!" 1>&2; exit 1; fi \n' +
+                             'DATADIR="/storage/plzen1/home/holcovam/ScanTools"\n' +
+                             'cp '+ref_path+ref_spec+'* $SCRATCHDIR || exit 1\n' +
+                             'cp $DATADIR/'+ vcf_dir +'*vcf.gz* $SCRATCHDIR || exit 1\n'+
+                             'cd $SCRATCHDIR || exit 2\n' +
+                             'echo data all scaffolds present in the vcf_dir loaded at `date`\n' +
+                             'ls *vcf.gz | parallel -j '+str(int(ncpu)-2)+' "java -Xmx' + str(int(int(mem)/(int(ncpu)-2))) + 'g -jar ' + gatk_path + ' -T SelectVariants -R ' + ref_name + ' -V {} '  + sample_string1 + ' -o {.}.' + pop + '.pop.vcf"\n' +
+                             'ls *pop.vcf | parallel -j '+str(int(ncpu)-2)+' "java -Xmx' + str(int(int(mem)/(int(ncpu)-2))) + 'g -jar ' + gatk_path + ' -T VariantFiltration -R ' + ref_name + ' -V {} --genotypeFilterExpression \\"DP < ' + str(min_dp) + '\\" --genotypeFilterName \\"DP\\" -o {.}.dp1.vcf"\n') # some bug in this part, well yea " were missing?
+                if keep_intermediates is False: shfile1.write('ls *pop.vcf| parallel -j '+str(int(ncpu)-2)+' "rm {} {}.idx"\n')
+                shfile1.write('ls *dp1.vcf| parallel -j '+str(int(ncpu)-2)+' "java -Xmx' + str(int(int(mem)/(int(ncpu)-2))) + 'g -jar ' + gatk_path + ' -T VariantFiltration -R ' + ref_name + ' -V {} --setFilteredGtToNocall -o {.}.nc.vcf"\n')
+                if keep_intermediates is False: shfile1.write('ls *dp1.vcf| parallel -j '+str(int(ncpu)-2)+' "rm {} {}.idx"\n')
+                shfile1.write('ls *nc.vcf |  parallel -j '+str(int(ncpu)-2)+' "java -Xmx' + str(int(int(mem)/(int(ncpu)-2))) + 'g -jar ' + gatk_path + ' -T SelectVariants -R ' + ref_name + ' -V {} --maxNOCALLnumber ' + str(mfg) + ' -o {.}.bi.vcf"\n')
+                if keep_intermediates is False: shfile1.write('ls *nc.vcf| parallel -j '+str(int(ncpu)-2)+' "rm {} {}.idx"\n')
+                shfile1.write('ls *bi.vcf| parallel -j '+str(int(ncpu)-2)+' "java -Xmx' + str(int(int(mem)/(int(ncpu)-2))) + 'g -jar ' + gatk_path + ' -T VariantsToTable -R ' + ref_name + ' -V {} -F CHROM -F POS -F REF -F AN -F DP -GF GT -o {.}_raw.table"\n') # it will contain the long string have to rename it
+                if keep_intermediates is False: shfile1.write('ls *bi.vcf| parallel -j '+str(int(ncpu)-2)+' "rm {} {}.idx"\n' +
+                        'echo filtering done at `date` now continue with combining the scaffolds\n\n\n')
+                
+                shfile1.write('cp $DATADIR/recode012.py $SCRATCHDIR || exit 1\n'+
+                        'cp $DATADIR/repol.py $SCRATCHDIR || exit 1\n'+
+                        'cp $DATADIR/'+repolarization_key+' $SCRATCHDIR || exit 1\n'+
+                        'cat *_raw.table | tail -n+2 > '+ pop +'.table\n'+
+                        'python3 recode012.py -i ' + pop + '.table -pop ' + pop + ' -o $SCRATCHDIR/\n'+
+                        'python3 repol.py -i ' + pop + '.table.recode.txt -o ' + pop + ' -r ' + repolarization_key + '\n')
+
+                shfile1.write('rm '+ref_spec+'*\n'+
+                            'rm *vcf.gz* \n'+
+                            'rm *_raw.table\n'+
+                            'rm recode012.py\n'+
+                            'rm repol.py\n'+
+                            'rm '+repolarization_key+'\n'+
+                            'rm '+ pop + '.table\n'+
+                            'cp $SCRATCHDIR/* $DATADIR/'+outdir+' || export CLEAN_SCRATCH=false\n'+
+                            'printf "\\nFinished\\n\\n"\n')
+                shfile1.close()
+
+                if print1 is False:  # send job to the MetaCentrum
+                   cmd1 = ('qsub ' + pop + vcf_dir_name + '.sh')
+                   p1 = subprocess.Popen(cmd1, shell=True)
+                   sts1 = os.waitpid(p1.pid, 0)[1]
+                   joblist.append(p1.pid)
+
+                else:
+                   file1 = open(pop + vcf_dir_name + '.sh', 'r')
+                   data1 = file1.read()
+                   print(data1)
+                   
+            if print1 is False:
+                self.log_file.write("###  Split VCFs  ###\n" +
+                                    "VCF Directory: " + vcf_dir + "\n" +
+                                    "Reference Path: " + ref_path + "\n" +
+                                    "Repolarization Key: " + repolarization_key + "\n" +
+                                    "Output Directory: " + outdir + "\n" +
+                                    "Min Depth Per Individual: " + str(min_dp) + "\n" +
+                                    "Max Fraction of Filtered Genotypes: " + str(mffg) + "\n" +
+                                    "Populations: " + str(pops) + "\n")
 
     def splitVCFsTreeMix(self, vcf_dir, min_dp, mffg, ref_path="/storage/plzen1/home/holcovam/references/lyrataV2/", ref_name="alygenomes.fasta", gatk_path="$GATK/GenomeAnalysisTK.jar", pops='all', mem=16, time_scratch='4:00:00', ncpu=4, scratch_path="$SCRATCHDIR",print1=True, overwrite=False, scratch_gb="10", keep_intermediates=False, use_scratch=True):
         '''Purpose:  Find all vcfs in vcf_dir and split them by population according to samples associated with said population.
@@ -301,8 +419,10 @@ class scantools:
                         'cp $DATADIR/repolann.py $SCRATCHDIR || exit 1\n'+
                         'cp $DATADIR/'+repolarization_key+' $SCRATCHDIR || exit 1\n'+
                         'cat *_raw.table | tail -n+2 > '+ pop +'.table\n'+
-                        'python3 recode012ann.py -i ' + pop + '.table -pop ' + pop + ' -o $SCRATCHDIR/\n'+
-                        'python3 repolann.py -i ' + pop + '.table.recode.txt -o ' + pop + ' -r ' + repolarization_key + '\n')
+                      #  'python3 recode012ann.py -i ' + pop + '.table -pop ' + pop + ' -o $SCRATCHDIR/\n'+ ###You might want to uncomment this!!!
+                        'python3 recode012ann.py -i ' + pop + '.table -pop ' + pop + ' -o $SCRATCHDIR/\n')
+
+                    #    'python3 repolann.py -i ' + pop + '.table.recode.txt -o ' + pop + ' -r ' + repolarization_key + '\n') ###You might want to uncomment this!!!
 
 
                 shfile1.write('rm '+ref_spec+'*\n'+
